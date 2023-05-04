@@ -2,32 +2,104 @@
 const server = Deno.listen({ port: 8080 });
 console.log(`HTTP webserver running.  Access it at:  http://localhost:8080/`);
 
+const maps: { [key: string]: any } = {};
+const global: Record<string, any> = {};
+
 // Connections to the server will be yielded up as an async iterable.
 for await (const conn of server) {
-  // In order to not be blocking, we need to handle each connection individually
-  // without awaiting the function
-  serveHttp(conn);
+    // In order to not be blocking, we need to handle each connection individually
+    // without awaiting the function
+    serveHttp(conn);
 }
 
 async function serveHttp(conn: Deno.Conn) {
-  // This "upgrades" a network connection into an HTTP connection.
-  const httpConn = Deno.serveHttp(conn);
-  // Each request sent over the HTTP connection will be yielded as an async
-  // iterator from the HTTP connection.
-  for await (const requestEvent of httpConn) {
-    // The native HTTP server uses the web standard `Request` and `Response`
-    // objects.
-    const body = `Your user-agent is:\n\n${
-      requestEvent.request.headers.get(
-        "user-agent",
-      ) ?? "Unknown"
-    }`;
-    // The requestEvent's `.respondWith()` method is how we send the response
-    // back to the client.
-    requestEvent.respondWith(
-      new Response(body, {
-        status: 200,
-      }),
-    );
-  }
+    // This "upgrades" a network connection into an HTTP connection.
+    const httpConn = Deno.serveHttp(conn);
+    // Each request sent over the HTTP connection will be yielded as an async
+    // iterator from the HTTP connection.
+    for await (const requestEvent of httpConn) {
+        let { url } = requestEvent.request
+        url = new URL(url).pathname
+
+        await handleApi(url, requestEvent)
+
+        console.log('[p0.1] url', url)
+        // The native HTTP server uses the web standard `Request` and `Response`
+        // objects.
+        const body = `Your user-agent is:\n\n${requestEvent.request.headers.get(
+            "user-agent",
+        ) ?? "Unknown"
+            }`;
+        // The requestEvent's `.respondWith()` method is how we send the response
+        // back to the client.
+        requestEvent.respondWith(
+            new Response(body, {
+                status: 200,
+            }),
+        );
+    }
+}
+
+async function handleApi(url: string, requestEvent: Deno.RequestEvent) {
+    url = '.' + url + '.ts'
+    let existPath = await Deno.lstat(url).then(() => true).catch(() => false)
+    console.log('[p0.2] existPath', url, existPath, import.meta.url)
+
+    if (!existPath) {
+        return false
+    }
+
+    const worker = new Worker(new URL(url, import.meta.url).href, {
+        type: 'module',
+    });
+    worker.postMessage(global)
+    worker.onmessage = autobind
+
+    const requestChannel = new MessageChannel();
+    worker.postMessage('request', [requestChannel.port2]);
+
+    console.log('[p0.4] worker post')
+    
+    requestChannel.port2.onmessage = (e) => {
+        console.log('[p0.3] data', e.data)
+        response(new Response(e.data.body, e.data.init), requestEvent)
+    }
+}
+
+function response(res: Response, e: Deno.RequestEvent) {
+    e.respondWith(res)
+}
+
+export async function autobind(e: MessageEvent) {
+    const name = e.data;
+    if (typeof name !== 'string') {
+        return;
+    }
+    let handler = await maps[name];
+    if (!handler) {
+        console.warn('Workers bind non-existent objects: ', name);
+        return;
+    }
+    const port = e.ports[0];
+    if (typeof handler === 'function') {
+        try {
+            handler = await handler(port);
+        } catch (error) {
+            console.error(`[autobind][${name}]: ${error}`);
+        }
+    }
+    try {
+        port.postMessage(handler);
+    } catch (_) {
+        // do nothing
+    }
+    port.onmessage = async (e) => {
+        const [method, ...args] = e.data;
+        try {
+            const res = await handler[method](...args);
+            port.postMessage(res);
+        } catch (error) {
+            console.error(`[${name}][${method}]: ${error}`);
+        }
+    }
 }
