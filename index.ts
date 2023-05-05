@@ -53,7 +53,10 @@ async function handleApi(url: string, requestEvent: Deno.RequestEvent) {
         type: 'module',
     });
 
-    worker.postMessage({path: url, type: 'fetch'})
-   
+     worker.postMessage(requestEvent.request.url);
+    // await worker.terminate();
+    return;
+    // worker.postMessage({ path: url, type: 'fetch' })
+
 }
 
