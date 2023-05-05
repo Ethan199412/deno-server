@@ -52,54 +52,8 @@ async function handleApi(url: string, requestEvent: Deno.RequestEvent) {
     const worker = new Worker(new URL(url, import.meta.url).href, {
         type: 'module',
     });
-    worker.postMessage(global)
-    worker.onmessage = autobind
 
-    const requestChannel = new MessageChannel();
-    worker.postMessage('request', [requestChannel.port2]);
-
-    console.log('[p0.4] worker post')
-    
-    requestChannel.port2.onmessage = (e) => {
-        console.log('[p0.3] data', e.data)
-        response(new Response(e.data.body, e.data.init), requestEvent)
-    }
+    worker.postMessage({path: url, type: 'fetch'})
+   
 }
 
-function response(res: Response, e: Deno.RequestEvent) {
-    e.respondWith(res)
-}
-
-export async function autobind(e: MessageEvent) {
-    const name = e.data;
-    if (typeof name !== 'string') {
-        return;
-    }
-    let handler = await maps[name];
-    if (!handler) {
-        console.warn('Workers bind non-existent objects: ', name);
-        return;
-    }
-    const port = e.ports[0];
-    if (typeof handler === 'function') {
-        try {
-            handler = await handler(port);
-        } catch (error) {
-            console.error(`[autobind][${name}]: ${error}`);
-        }
-    }
-    try {
-        port.postMessage(handler);
-    } catch (_) {
-        // do nothing
-    }
-    port.onmessage = async (e) => {
-        const [method, ...args] = e.data;
-        try {
-            const res = await handler[method](...args);
-            port.postMessage(res);
-        } catch (error) {
-            console.error(`[${name}][${method}]: ${error}`);
-        }
-    }
-}
