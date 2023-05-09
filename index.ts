@@ -1,9 +1,11 @@
 // Start listening on port 8080 of localhost.
+
+/**
+ * 1. 通过 Deno.listen 拿到 server
+ */
 const server = Deno.listen({ port: 8080 });
 console.log(`HTTP webserver running.  Access it at:  http://localhost:8080/`);
 
-const maps: { [key: string]: any } = {};
-const global: Record<string, any> = {};
 
 // Connections to the server will be yielded up as an async iterable.
 for await (const conn of server) {
@@ -19,24 +21,11 @@ async function serveHttp(conn: Deno.Conn) {
     // iterator from the HTTP connection.
     for await (const requestEvent of httpConn) {
         let { url } = requestEvent.request
+
         url = new URL(url).pathname
+        console.log('[p0.1] url', url)
 
         await handleApi(url, requestEvent)
-
-        console.log('[p0.1] url', url)
-        // The native HTTP server uses the web standard `Request` and `Response`
-        // objects.
-        const body = `Your user-agent is:\n\n${requestEvent.request.headers.get(
-            "user-agent",
-        ) ?? "Unknown"
-            }`;
-        // The requestEvent's `.respondWith()` method is how we send the response
-        // back to the client.
-        requestEvent.respondWith(
-            new Response(body, {
-                status: 200,
-            }),
-        );
     }
 }
 
@@ -46,14 +35,18 @@ async function handleApi(url: string, requestEvent: Deno.RequestEvent) {
     console.log('[p0.2] existPath', url, existPath, import.meta.url)
 
     if (!existPath) {
-        return false
+        return requestEvent.respondWith(new Response('no such api'))
     }
 
     const worker = new Worker(new URL(url, import.meta.url).href, {
         type: 'module',
     });
 
-    worker.postMessage({path: url, type: 'fetch'})
-   
+    worker.onmessage = ({data}) => {
+        console.log('[p0.3] I get response from worker data', data)
+        requestEvent.respondWith(new Response(data))
+    }
+
+    worker.postMessage(requestEvent.request)
 }
 

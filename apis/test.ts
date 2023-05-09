@@ -1,15 +1,6 @@
-import { Request } from 'https://deno.land/std/http/server.ts';
+addEventListener("message", async (event) => {
+  const response = "Hello, Deno!";
 
-addEventListener('fetch', (event: FetchEvent) => {
-  const { request } = event;
-
-  event.respondWith(handleRequest(request));
+  // 将响应数据发送给主线程
+  postMessage(response);
 });
-
-async function handleRequest(req: Request) {
-  console.log(`Request for ${req.url}`);
-
-  const body = 'Hello, World!';
-
-  return new Response(body);
-}
